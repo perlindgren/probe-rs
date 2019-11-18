@@ -1,25 +1,56 @@
+//! Debugging support for probe-rs
+//!
+//! The `debug` module contains various debug functionality, which can be
+//! used to implement a debugger based on `probe-rs`.
+
 pub mod typ;
 pub mod variable;
 
-pub use typ::*;
-pub use variable::*;
+use typ::Type;
+use variable::Variable;
 
 use gimli::FileEntry;
 use gimli::LineProgramHeader;
 use std::borrow;
-use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use crate::coresight::memory::MI;
+use std::fmt;
+use std::io;
 use std::str::from_utf8;
 
 use object::read::Object;
 
-use crate::session::Session;
+use log::{debug, info};
 
-#[derive(Debug, Copy, Clone)]
+use crate::session::Session;
+use crate::coresight::memory::MI;
+
+#[derive(Debug)]
+pub enum Error {
+    Io(io::Error),
+    DebugData(&'static str),
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::Io(e)
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::Io(e) => e.fmt(fmt),
+            Error::DebugData(e) => write!(fmt, "Error accessing debug data: {}", e),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ColumnType {
     LeftEdge,
     Column(u64),
@@ -135,7 +166,7 @@ impl std::ops::IndexMut<std::ops::Range<usize>> for Registers {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct SourceLocation {
     pub line: Option<u64>,
     pub column: Option<ColumnType>,
@@ -178,15 +209,28 @@ impl<'a> Iterator for StackFrameIterator<'a> {
         let pc = match self.pc {
             Some(pc) => pc,
             None => {
+                debug!("Unable to determine next frame, program counter is zero");
                 return None;
             }
         };
 
-        let unwind_info = self
-            .debug_info
-            .frame_section
-            .unwind_info_for_address(&bases, &mut ctx, pc, gimli::DebugFrame::cie_from_offset)
-            .unwrap();
+        let unwind_info = self.debug_info.frame_section.unwind_info_for_address(
+            &bases,
+            &mut ctx,
+            pc,
+            gimli::DebugFrame::cie_from_offset,
+        );
+
+        let unwind_info = match unwind_info {
+            Ok(uw) => uw,
+            Err(e) => {
+                info!(
+                    "Failed to retrieve debug information for program counter {:#x}: {}",
+                    pc, e
+                );
+                return None;
+            }
+        };
 
         let current_cfa = match unwind_info.cfa() {
             gimli::CfaRule::RegisterAndOffset { register, offset } => {
@@ -196,6 +240,10 @@ impl<'a> Iterator for StackFrameIterator<'a> {
             }
             gimli::CfaRule::Expression(_) => unimplemented!(),
         };
+
+        if let Some(ref cfa) = &current_cfa {
+            debug!("Current CFA: {:#x}", cfa);
+        }
 
         // generate previous registers
         for i in 0..16 {
@@ -218,6 +266,8 @@ impl<'a> Iterator for StackFrameIterator<'a> {
                         .unwrap();
 
                     let val = u32::from_le_bytes(buff);
+
+                    debug!("reg[{: >}]={:#08x}", i, val);
 
                     Some(val)
                 }
@@ -264,14 +314,15 @@ pub struct DebugInfo {
 }
 
 impl DebugInfo {
-    pub fn from_file(path: impl AsRef<Path>) -> Result<Self, std::io::Error> {
-        let data = fs::read(path)?;
+    /// Read debug info directly from a file.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<DebugInfo, Error> {
+        let data = std::fs::read(path)?;
 
-        Ok(Self::from_raw(&data))
+        DebugInfo::from_raw(&data)
     }
 
-    pub fn from_raw(data: &[u8]) -> Self {
-        let object = object::File::parse(data).unwrap();
+    pub fn from_raw(data: &[u8]) -> Result<Self, Error> {
+        let object = object::File::parse(data).map_err(|e| Error::DebugData(e))?;
 
         // Load a section and return as `Cow<[u8]>`.
         let load_section = |id: gimli::SectionId| -> Result<DwarfReader, gimli::Error> {
@@ -300,14 +351,14 @@ impl DebugInfo {
 
         let frame_section = gimli::DebugFrame::load(load_section).unwrap();
 
-        DebugInfo {
+        Ok(DebugInfo {
             //object,
             dwarf: dwarf_cow,
             frame_section,
-        }
+        })
     }
 
-    fn get_source_location(&self, address: u64) -> Option<SourceLocation> {
+    pub fn get_source_location(&self, address: u64) -> Option<SourceLocation> {
         let mut units = self.dwarf.units();
 
         while let Some(header) = units.next().unwrap() {
@@ -471,13 +522,25 @@ impl DebugInfo {
     }
 
     /// Find the program counter where a breakpoint should be set,
-    /// given a source file and a line.
+    /// given a source file, a line and optionally a column.
     pub fn get_breakpoint_location(
         &self,
         path: &Path,
         line: u64,
+        column: Option<u64>,
     ) -> Result<Option<u64>, gimli::read::Error> {
+        debug!(
+            "Looking for breakpoint location for {}:{}{}",
+            path.display(),
+            line,
+            column
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "-".to_owned())
+        );
+
         let mut unit_iter = self.dwarf.units();
+
+        let mut locations = Vec::new();
 
         while let Some(unit_header) = unit_iter.next()? {
             let unit = self.dwarf.unit(unit_header)?;
@@ -507,7 +570,7 @@ impl DebugInfo {
 
                             if let Some(cur_line) = row.line() {
                                 if cur_line == line {
-                                    return Ok(Some(row.address()));
+                                    locations.push((row.address(), row.column()));
                                 }
                             }
                         }
@@ -516,9 +579,55 @@ impl DebugInfo {
             }
         }
 
-        Ok(None)
+        // Look for the break point location for the best match based on the column specified.
+        match locations.len() {
+            0 => Ok(None),
+            1 => Ok(Some(locations[0].0)),
+            n => {
+                println!("Found {} possible breakpoint locations", n);
+
+                locations.sort_by({
+                    |a, b| {
+                        if a.1 != b.1 {
+                            a.1.cmp(&b.1)
+                        } else {
+                            a.0.cmp(&b.0)
+                        }
+                    }
+                });
+
+                for loc in &locations {
+                    println!("col={:?}, addr={}", loc.1, loc.0);
+                }
+
+                match column {
+                    Some(search_col) => {
+                        let mut best_location = &locations[0];
+
+                        let search_col = match search_col {
+                            0 => gimli::read::ColumnType::LeftEdge,
+                            c => gimli::read::ColumnType::Column(c),
+                        };
+
+                        for loc in &locations[1..] {
+                            if loc.1 > search_col {
+                                break;
+                            }
+
+                            if best_location.1 < loc.1 {
+                                best_location = loc;
+                            }
+                        }
+
+                        Ok(Some(best_location.0))
+                    }
+                    None => Ok(Some(locations[0].0)),
+                }
+            }
+        }
     }
 
+    /// Get the absolute path for an entry in a line program header
     fn get_path(
         &self,
         comp_dir: &Path,
@@ -533,8 +642,8 @@ impl DebugInfo {
 
         let name_path = Path::new(from_utf8(&file_name_attr_string).ok()?);
 
-        let dir_path = dir_name_attr_string
-            .and_then(|dir_name| from_utf8(&dir_name).ok().map(PathBuf::from));
+        let dir_path =
+            dir_name_attr_string.and_then(|dir_name| from_utf8(&dir_name).ok().map(PathBuf::from));
 
         let mut combined_path = match dir_path {
             Some(dir_path) => dir_path.join(name_path),
@@ -761,12 +870,11 @@ fn extract_type(unit_info: &UnitInfo, attribute_value: gimli::AttributeValue<R>)
                                 entry.attr(gimli::DW_AT_name).unwrap().unwrap().value(),
                             );
                             named_children.insert(
-                                member_name.unwrap(),
+                                member_name?,
                                 extract_type(
                                     unit_info,
-                                    entry.attr(gimli::DW_AT_type).unwrap().unwrap().value(),
-                                )
-                                .unwrap(),
+                                    (entry.attr(gimli::DW_AT_type).ok()?)?.value(),
+                                )?,
                             );
                         };
                     }
