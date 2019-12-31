@@ -109,7 +109,7 @@ impl<'a> Flasher<'a> {
     }
 
     pub fn double_buffering_supported(&self) -> bool {
-        self.double_buffering_supported
+        self.flash_algorithm.page_buffers.len() > 1
     }
 
     pub fn init<'b, 's: 'b, O: Operation>(
@@ -365,7 +365,7 @@ impl<'a, O: Operation> ActiveFlasher<'a, O> {
         init: bool,
     ) -> Result<u32, FlasherError> {
         self.call_function(pc, r0, r1, r2, r3, init)?;
-        self.wait_for_completion()
+        self.wait_until_routine_finished()
     }
 
     fn call_function(
@@ -425,7 +425,7 @@ impl<'a, O: Operation> ActiveFlasher<'a, O> {
         Ok(())
     }
 
-    pub fn wait_for_completion(&mut self) -> Result<u32, FlasherError> {
+    pub fn wait_until_routine_finished(&mut self) -> Result<u32, FlasherError> {
         log::debug!("Waiting for routine call completion.");
         let regs = self.target.core.registers();
 
@@ -535,7 +535,7 @@ impl<'a> ActiveFlasher<'a, Program> {
         let algo = flasher.flash_algorithm;
 
         // Check the buffer number.
-        if buffer_number < algo.page_buffers.len() as u32 {
+        if buffer_number >= algo.page_buffers.len() as u32 {
             return Err(FlasherError::InvalidBufferNumber(
                 buffer_number,
                 algo.page_buffers.len() as u32,
@@ -564,7 +564,7 @@ impl<'a> ActiveFlasher<'a, Program> {
         let algo = flasher.flash_algorithm;
 
         // Check the buffer number.
-        if buffer_number < algo.page_buffers.len() as u32 {
+        if buffer_number >= algo.page_buffers.len() as u32 {
             return Err(FlasherError::InvalidBufferNumber(
                 buffer_number,
                 algo.page_buffers.len() as u32,

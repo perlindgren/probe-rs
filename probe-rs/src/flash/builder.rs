@@ -226,7 +226,7 @@ impl<'a> FlashBuilder<'a> {
         // Flash all necessary pages.
         progress.started_flashing();
 
-        if flash.double_buffering_supported() && self.enable_double_buffering {
+        if flash.double_buffering_supported() {
             self.program_double_buffer(&mut flash, &sectors, progress)?;
         } else {
             self.program_simple(&mut flash, &sectors, progress)?;
@@ -397,26 +397,6 @@ impl<'a> FlashBuilder<'a> {
         result
     }
 
-    /// Program all sectors in `sectors` by first performing a chip erase.
-    fn program_simple(
-        &self,
-        flash: &mut Flasher,
-        sectors: &[FlashSector],
-        progress: &FlashProgress,
-    ) -> Result<(), FlashBuilderError> {
-        let mut t = std::time::Instant::now();
-        let result = flash.run_program(|active| {
-            for page in Self::pages(sectors) {
-                active.program_page(page.address, page.data.as_slice())?;
-                progress.page_programmed(page.size, t.elapsed().as_millis());
-                t = std::time::Instant::now();
-            }
-            Ok(())
-        });
-        progress.finished_programming();
-        result
-    }
-
     /// Perform an erase of all sectors given in `sectors` which contain pages.
     fn sector_erase(
         &self,
@@ -440,6 +420,27 @@ impl<'a> FlashBuilder<'a> {
         Ok(())
     }
 
+
+    /// Program all sectors in `sectors` by first performing a chip erase.
+    fn program_simple(
+        &self,
+        flash: &mut Flasher,
+        sectors: &[FlashSector],
+        progress: &FlashProgress,
+    ) -> Result<(), FlashBuilderError> {
+        let mut t = std::time::Instant::now();
+        let result = flash.run_program(|active| {
+            for page in Self::pages(sectors) {
+                active.program_page(page.address, page.data.as_slice())?;
+                progress.page_programmed(page.size, t.elapsed().as_millis());
+                t = std::time::Instant::now();
+            }
+            Ok(())
+        });
+        progress.finished_programming();
+        result
+    }
+
     /// Flash a program using double buffering.
     ///
     /// UNTESTED
@@ -456,9 +457,10 @@ impl<'a> FlashBuilder<'a> {
                 // At the start of each loop cycle load the next page buffer into RAM.
                 active.load_page_buffer(page.address, page.data.as_slice(), current_buf)?;
 
-                // Then wait for the active RAM -> Flash copy process to finish.
+                // Then wait for the active RAM -> Flash copy process to finish
+                // if there is a process onging (Not the case in the first iteration of this loop).
                 // Also check if it finished properly. If it didn't, return an error.
-                let result = active.wait_for_completion();
+                let result = active.wait_until_routine_finished();
                 progress.page_programmed(page.size, t.elapsed().as_millis());
                 t = std::time::Instant::now();
                 if let Ok(0) = result {
@@ -467,7 +469,7 @@ impl<'a> FlashBuilder<'a> {
                 }
 
                 // Start the next copy process.
-                active.start_program_page_with_buffer(current_buf, page.address)?;
+                active.start_program_page_with_buffer(page.address, current_buf)?;
 
                 // Swap the buffers
                 if current_buf == 1 {
@@ -476,8 +478,12 @@ impl<'a> FlashBuilder<'a> {
                     current_buf = 1;
                 }
             }
-
-            Ok(())
+            let result = active.wait_until_routine_finished();
+            if let Ok(0) = result {
+                Ok(())
+            } else {
+                Err(FlashBuilderError::ProgramPage(0, 0))
+            }
         });
         progress.finished_programming();
         result
