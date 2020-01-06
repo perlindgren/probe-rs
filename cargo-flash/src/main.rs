@@ -1,4 +1,4 @@
-#![recursion_limit="256"]
+#![recursion_limit = "256"]
 
 mod gdb_server;
 
@@ -12,8 +12,8 @@ use std::{
     fmt,
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
-    time::Instant,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 use structopt::StructOpt;
 
@@ -43,13 +43,29 @@ struct Opt {
     nrf_recover: bool,
     #[structopt(name = "list-chips", long = "list-chips")]
     list_chips: bool,
-    #[structopt(name = "gdb", long = "gdb", help = "Use this flag to automatically spawn a GDB server instance after flashing the target.")]
+    #[structopt(
+        name = "gdb",
+        long = "gdb",
+        help = "Use this flag to automatically spawn a GDB server instance after flashing the target."
+    )]
     gdb: bool,
-    #[structopt(name = "no-download", long = "no-download", help = "Use this flag to prevent the actual flashing procedure (use if you just want to attach GDB).")]
+    #[structopt(
+        name = "no-download",
+        long = "no-download",
+        help = "Use this flag to prevent the actual flashing procedure (use if you just want to attach GDB)."
+    )]
     no_download: bool,
-    #[structopt(name = "reset-halt", long = "reset-halt", help = "Use this flag to reset and halt (instead of just a reset) the attached core after flashing the target.")]
+    #[structopt(
+        name = "reset-halt",
+        long = "reset-halt",
+        help = "Use this flag to reset and halt (instead of just a reset) the attached core after flashing the target."
+    )]
     reset_halt: bool,
-    #[structopt(name = "gdb-connection-string", long = "gdb-connection-string", help = "Use this flag to override the default GDB connection string (localhost:1337).")]
+    #[structopt(
+        name = "gdb-connection-string",
+        long = "gdb-connection-string",
+        help = "Use this flag to override the default GDB connection string (localhost:1337)."
+    )]
     gdb_connection_string: Option<String>,
 
     // `cargo build` arguments
@@ -162,7 +178,10 @@ fn main_try() -> Result<(), failure::Error> {
     }
 
     // Remove possible `--gdb-connection-string` argument as cargo build does not understand it.
-    if let Some(index) = args.iter().position(|x| x.starts_with("--gdb-connection-string")) {
+    if let Some(index) = args
+        .iter()
+        .position(|x| x.starts_with("--gdb-connection-string"))
+    {
         args.remove(index);
     }
 
@@ -353,13 +372,15 @@ fn main_try() -> Result<(), failure::Error> {
     }
 
     if opt.gdb {
-        let gdb_connection_string = opt.gdb_connection_string.or(Some("localhost:1337".to_string()));
+        let gdb_connection_string = opt
+            .gdb_connection_string
+            .or(Some("localhost:1337".to_string()));
         // This next unwrap will always resolve as the connection string is always Some(T).
-        println!("Firing up GDB stub at {}", gdb_connection_string.as_ref().unwrap());
-        if let Err(e) = gdb_server::run(
-            gdb_connection_string,
-            Arc::new(Mutex::new(session))
-        ) {
+        println!(
+            "Firing up GDB stub at {}",
+            gdb_connection_string.as_ref().unwrap()
+        );
+        if let Err(e) = gdb_server::run(gdb_connection_string, Arc::new(Mutex::new(session))) {
             eprintln!("During the execution of GDB an error was encountered:");
             eprintln!("{:?}", e);
         }
