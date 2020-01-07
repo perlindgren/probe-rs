@@ -3,7 +3,7 @@
 use async_std::{net::TcpStream, prelude::*};
 use futures::channel::mpsc;
 use gdb_protocol::{
-    packet::{CheckedPacket, Kind as PacketKind, UncheckedPacket},
+    packet::{CheckedPacket, Kind as PacketKind},
     parser::Parser,
 };
 use std::sync::Arc;
