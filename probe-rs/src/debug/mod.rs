@@ -24,8 +24,8 @@ use object::read::Object;
 
 use log::{debug, info};
 
-use crate::session::Session;
 use crate::coresight::memory::MI;
+use crate::session::Session;
 
 #[derive(Debug)]
 pub enum Error {
