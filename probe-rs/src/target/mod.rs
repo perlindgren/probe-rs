@@ -111,11 +111,26 @@ pub trait Core: std::fmt::Debug + dyn_clone::DynClone + Sync + Send {
         addr: u32,
     ) -> Result<(), DebugProbeError>;
 
+    /// Clear specified breakpoint
     fn clear_breakpoint(
         &self,
         mi: &mut MasterProbe,
         bp_unit_index: usize,
     ) -> Result<(), DebugProbeError>;
+
+    /// Default implementation to clear all breakpoints
+    fn clear_all_breakpoints(
+        &self,
+        mi: &mut MasterProbe,
+        // bp_unit_index: usize,
+    ) -> Result<(), DebugProbeError> {
+        let bkpt_units = self.get_available_breakpoint_units(mi)?;
+        log::info!("-- bkpt_units {:?}", bkpt_units);
+        for i in 0..bkpt_units {
+            self.clear_breakpoint(mi, i as usize)?;
+        }
+        Ok(())
+    }
 
     fn read_block8(
         &self,
