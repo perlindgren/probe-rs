@@ -132,8 +132,6 @@ pub(crate) fn send_command<Req: Request, Res: Response>(
     let mut size = request.to_bytes(&mut write_buffer, 1 + 1)?;
     size += 2;
 
-    println!("size {}", size);
-
     if let Ok(device) = device.get_mut() {
         // On Windows, HID writes must write exactly the size of the
         // largest report for the device, but there's no way to query
