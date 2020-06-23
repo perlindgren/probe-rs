@@ -1,6 +1,5 @@
 ---
 name: SAME54
-manufacturer: ~
 variants:
   - name: ATSAME54N19A
     part: ~
@@ -64,7 +63,7 @@ variants:
       - atsame54_1024
 flash_algorithms:
   ATSAME54_512:
-    name: ATSAME54_512
+    name: atsame54_512
     description: ATSAME54 512kB Flash
     default: true
     instructions: ASGJB4prUgcB1SFKCmDPIiBJEgIKgE4iCoIfSUlECGAAIHBHACBwRxpJSGEbSoqASorSB/zQSGEYSBE4iIBIisAH/NAIik4hCEAA0AEgcEcwtRJLD0zbHKOAY4rbB/zQyRyJCANGiQAC4CDKCR8gwwAp+tFgYQlIDziggGCKwAf80CCKTiEIQADQASAwvQAAIgABAABAAEEEAAAAEqUAAAAAAAAAAAAA
