@@ -132,6 +132,8 @@ pub(crate) fn send_command<Req: Request, Res: Response>(
     let mut size = request.to_bytes(&mut write_buffer, 1 + 1)?;
     size += 2;
 
+    println!("size {}", size);
+
     if let Ok(device) = device.get_mut() {
         // On Windows, HID writes must write exactly the size of the
         // largest report for the device, but there's no way to query
@@ -141,7 +143,8 @@ pub(crate) fn send_command<Req: Request, Res: Response>(
         // For v2 devices, we can write the precise request size.
         match device {
             DAPLinkDevice::V1(_) => {
-                size = 65;
+                // size = 65; // the normal HID report size for CMSIS-DAP
+                size = 513; // the EDBG (Atmel/Microchip) HID report size
             }
             _ => (),
         }
