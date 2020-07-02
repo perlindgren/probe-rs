@@ -141,8 +141,8 @@ pub(crate) fn send_command<Req: Request, Res: Response>(
         // For v2 devices, we can write the precise request size.
         match device {
             DAPLinkDevice::V1(_) => {
-                // size = 65; // the normal HID report size for CMSIS-DAP
-                size = 513; // the EDBG (Atmel/Microchip) HID report size
+                size = 65; // the normal HID report size for CMSIS-DAP
+                           // size = 513; // the EDBG (Atmel/Microchip) HID report size
             }
             _ => (),
         }
